@@ -46,8 +46,10 @@ if [[ ! -x "$CODEX_BIN" ]]; then
   exit 1
 fi
 
-if ! "$CODEX_BIN" login status 2>/dev/null | grep -q 'Logged in using ChatGPT'; then
+CODEX_STATUS="$("$CODEX_BIN" login status 2>&1 || true)"
+if [[ "$CODEX_STATUS" != *"Logged in using ChatGPT"* ]]; then
   echo "[$(timestamp)] Codex is not signed in with ChatGPT; daily run aborted." >&2
+  echo "$CODEX_STATUS" >&2
   exit 1
 fi
 

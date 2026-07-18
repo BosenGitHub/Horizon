@@ -1,45 +1,79 @@
 #!/usr/bin/env bash
-# Horizon daily run + deploy to GitHub Pages
-# Usage: ./scripts/daily-run.sh
-# Cron:  0 8 * * * /path/to/horizon/scripts/daily-run.sh >> /path/to/horizon/logs/cron.log 2>&1
+# Run Horizon locally with the signed-in Codex CLI, then publish only docs/
+# to the user's GitHub Pages branch. No model API key is required.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-LOG_PREFIX="[$(date '+%Y-%m-%d %H:%M:%S')]"
+UV_BIN="${UV_BIN:-$PROJECT_DIR/.uv/tools/uv}"
+CODEX_BIN="${CODEX_BIN:-/Applications/ChatGPT.app/Contents/Resources/codex}"
+PAGES_REMOTE="${HORIZON_PAGES_REMOTE:-https://github.com/BosenGitHub/Horizon.git}"
+LOCK_DIR="$PROJECT_DIR/.uv/daily-run.lock"
+TEMP_ROOT=""
+
+export PATH="/Users/bosenliu/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+export UV_CACHE_DIR="$PROJECT_DIR/.uv/cache"
+
+timestamp() {
+  date '+%Y-%m-%d %H:%M:%S'
+}
+
+cleanup() {
+  if [[ -n "$TEMP_ROOT" && -d "$TEMP_ROOT" ]]; then
+    rm -rf "$TEMP_ROOT"
+  fi
+  rmdir "$LOCK_DIR" 2>/dev/null || true
+}
+
+mkdir -p "$PROJECT_DIR/.uv" "$PROJECT_DIR/logs"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  echo "[$(timestamp)] Another Horizon daily run is already active; skipping."
+  exit 0
+fi
+trap cleanup EXIT INT TERM
 
 cd "$PROJECT_DIR"
+echo "[$(timestamp)] Starting Horizon daily run."
 
-echo "$LOG_PREFIX Starting Horizon daily run..."
+if [[ ! -x "$UV_BIN" ]]; then
+  echo "[$(timestamp)] Local uv executable not found: $UV_BIN" >&2
+  exit 1
+fi
 
-# 1. Pull latest code
-git pull --quiet origin main
+if [[ ! -x "$CODEX_BIN" ]]; then
+  echo "[$(timestamp)] Codex executable not found: $CODEX_BIN" >&2
+  exit 1
+fi
 
-# 2. Install/update dependencies
-uv sync --quiet
+if ! "$CODEX_BIN" login status 2>/dev/null | grep -q 'Logged in using ChatGPT'; then
+  echo "[$(timestamp)] Codex is not signed in with ChatGPT; daily run aborted." >&2
+  exit 1
+fi
 
-# 3. Run Horizon
-uv run horizon --hours 24
+"$UV_BIN" run horizon --hours 24
 
-# 4. Deploy docs to gh-pages
-echo "$LOG_PREFIX Deploying to gh-pages..."
+echo "[$(timestamp)] Publishing docs to gh-pages."
+TEMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/horizon-pages.XXXXXX")"
+PAGES_DIR="$TEMP_ROOT/pages"
 
-# Use a temporary worktree to update gh-pages without switching branches
-TMPDIR=$(mktemp -d)
-trap "rm -rf $TMPDIR" EXIT
+if git ls-remote --exit-code --heads "$PAGES_REMOTE" gh-pages >/dev/null 2>&1; then
+  git clone --quiet --depth 1 --branch gh-pages "$PAGES_REMOTE" "$PAGES_DIR"
+else
+  git init --quiet --initial-branch=gh-pages "$PAGES_DIR"
+  git -C "$PAGES_DIR" remote add origin "$PAGES_REMOTE"
+fi
 
-git fetch origin gh-pages:gh-pages 2>/dev/null || git checkout --orphan gh-pages && git checkout main
+rsync -a --delete --exclude='.git/' "$PROJECT_DIR/docs/" "$PAGES_DIR/"
+git -C "$PAGES_DIR" config user.name BosenGitHub
+git -C "$PAGES_DIR" config user.email BosenGitHub@users.noreply.github.com
+git -C "$PAGES_DIR" add -A
 
-git worktree add "$TMPDIR" gh-pages
-cp -r docs/* "$TMPDIR/"
+if git -C "$PAGES_DIR" diff --cached --quiet; then
+  echo "[$(timestamp)] No documentation changes to publish."
+  exit 0
+fi
 
-cd "$TMPDIR"
-git add -A
-git commit -m "Daily Summary: $(date '+%Y-%m-%d')" || { echo "$LOG_PREFIX Nothing to commit."; exit 0; }
-git push origin gh-pages
-
-cd "$PROJECT_DIR"
-git worktree remove "$TMPDIR"
-
-echo "$LOG_PREFIX Done."
+git -C "$PAGES_DIR" commit --quiet -m "Daily Summary: $(date '+%Y-%m-%d')"
+git -C "$PAGES_DIR" push --quiet origin gh-pages
+echo "[$(timestamp)] Horizon daily run completed."

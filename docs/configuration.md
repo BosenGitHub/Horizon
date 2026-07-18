@@ -37,6 +37,42 @@ Common API key variable names:
 | Doubao | `DOUBAO_API_KEY` |
 | DeepSeek | `DEEPSEEK_API_KEY` |
 
+**Codex with ChatGPT plan usage (local only, no model API key)**:
+
+```json
+{
+  "ai": {
+    "provider": "codex",
+    "model": "gpt-5.6-luna",
+    "api_key_env": "",
+    "languages": ["zh", "en"],
+    "analysis_concurrency": 2,
+    "enrichment_concurrency": 2,
+    "codex_batch_size": 8
+  }
+}
+```
+
+This provider runs the locally installed `codex exec` command. Sign in once
+with `codex login` and choose ChatGPT authentication. Horizon then uses the
+Codex/ChatGPT plan's usage limits instead of an OpenAI Platform API key.
+
+The adapter is intended for a trusted local machine. It runs every completion
+as an ephemeral, read-only Codex job, disables user configuration, and tells
+Codex not to use tools. Spawned-command environment inheritance is disabled and
+the Codex working directory is isolated from the Horizon repository. It is not
+a general OpenAI API replacement and should
+not be exposed as a public service. Set `CODEX_BIN` when the executable is not
+on `PATH`:
+
+```bash
+CODEX_BIN=/Applications/ChatGPT.app/Contents/Resources/codex
+```
+
+`codex_batch_size` reduces fixed Codex session overhead by scoring several
+independent news items in one read-only run. Values from 6 to 10 are a good
+local starting range; the default is 8.
+
 **Anthropic Claude**:
 
 ```json
@@ -393,6 +429,8 @@ uv pip install --only-binary=:all: openbb openbb-benzinga
   "sources": {
     "openbb": {
       "enabled": true,
+      "fetch_filings": true,
+      "filings_provider": "sec",
       "watchlists": [
         {
           "name": "megacaps",
@@ -410,6 +448,8 @@ uv pip install --only-binary=:all: openbb openbb-benzinga
 
 - `enabled` — enable or disable the OpenBB source globally
 - `watchlists` — list of named ticker groups; each watchlist becomes one `news.company()` call per run
+- `fetch_filings` — also fetch recent public-company filings for every watchlist symbol
+- `filings_provider` — OpenBB filings provider; `sec` is free and needs no API key
 - `name` — label shown in Horizon metadata and selection breakdowns
 - `provider` — OpenBB provider name such as `yfinance` or `benzinga`
 - `fetch_limit` — maximum news rows requested for that watchlist
@@ -597,7 +637,7 @@ Set `RESEND_API_KEY` in `.env`. Recipients are loaded from `data/subscribers.jso
 
 ## Webhook Notification
 
-Webhook notification is optional and disabled unless `webhook.enabled` is `true`. Horizon can call Feishu/Lark, DingTalk, Slack, Discord, or any custom webhook endpoint when the pipeline succeeds or fails.
+Webhook notification is optional and disabled unless a `webhook` or `webhooks[]` target has `enabled: true`. Horizon can call Feishu/Lark, DingTalk, Slack, Discord, or any custom webhook endpoint when the pipeline succeeds or fails. Use `webhook` for one backward-compatible target or `webhooks` for simultaneous multi-platform delivery.
 
 ```json
 {
@@ -615,6 +655,17 @@ Webhook notification is optional and disabled unless `webhook.enabled` is `true`
     },
     "headers": ""
   }
+}
+```
+
+For multiple targets, put the same target objects in a list:
+
+```json
+{
+  "webhooks": [
+    {"enabled": true, "platform": "feishu", "url_env": "HORIZON_FEISHU_WEBHOOK_URL"},
+    {"enabled": true, "platform": "dingtalk", "url_env": "HORIZON_DINGTALK_WEBHOOK_URL"}
+  ]
 }
 ```
 

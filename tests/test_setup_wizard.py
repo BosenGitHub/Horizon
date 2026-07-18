@@ -41,6 +41,35 @@ def test_ai_recommendations_available_for_ollama_without_api_key():
     assert wizard._ai_recommendations_available(config) is True
 
 
+def test_configure_ai_allows_codex_with_chatgpt_login_and_no_api_key(monkeypatch):
+    answers = iter(["codex", "gpt-5.6-luna", "zh,en"])
+
+    monkeypatch.setattr(wizard.Prompt, "ask", lambda *args, **kwargs: next(answers))
+    monkeypatch.setattr(wizard.console, "print", lambda *args, **kwargs: None)
+
+    config = wizard.configure_ai()
+
+    assert config == AIConfig(
+        provider=AIProvider.CODEX,
+        model="gpt-5.6-luna",
+        base_url=None,
+        api_key_env="",
+        temperature=0.3,
+        max_tokens=8192,
+        languages=["zh", "en"],
+    )
+
+
+def test_ai_recommendations_available_for_codex_without_api_key():
+    config = AIConfig(
+        provider=AIProvider.CODEX,
+        model="gpt-5.6-luna",
+        api_key_env="",
+    )
+
+    assert wizard._ai_recommendations_available(config) is True
+
+
 def test_ai_recommendations_require_api_key_for_cloud_provider(monkeypatch):
     config = AIConfig(
         provider=AIProvider.OPENAI,

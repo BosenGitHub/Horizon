@@ -52,6 +52,19 @@ class ContentAnalyzer:
         return max(concurrency, 1)
 
     async def analyze_batch(self, items: List[ContentItem]) -> List[ContentItem]:
+        bulk_complete = getattr(self.client, "complete_many", None)
+        if callable(bulk_complete) and items:
+            try:
+                prompts = [self._build_user_prompt(item) for item in items]
+                responses = await bulk_complete(CONTENT_ANALYSIS_SYSTEM, prompts)
+                if len(responses) != len(items):
+                    raise ValueError("Bulk analysis returned an unexpected result count")
+                for item, response in zip(items, responses):
+                    self._apply_analysis_response(item, response)
+                return items
+            except Exception as exc:
+                print(f"Codex batch analysis failed ({exc}); falling back to individual analysis")
+
         throttle_sec = self._get_throttle_sec()
         concurrency = self._get_concurrency()
         semaphore = asyncio.Semaphore(concurrency)
@@ -85,16 +98,8 @@ class ContentAnalyzer:
 
         return analyzed_items
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(min=2, max=10)
-    )
-    async def _analyze_item(self, item: ContentItem) -> None:
-        """Analyze a single content item.
-
-        Args:
-            item: Content item to analyze (modified in-place)
-        """
+    def _build_user_prompt(self, item: ContentItem) -> str:
+        """Build the existing single-item prompt for individual or bulk calls."""
         # Prepare content section
         content_section = ""
         if item.content:
@@ -140,7 +145,7 @@ class ContentAnalyzer:
         discussion_section = "\n".join(discussion_parts) if discussion_parts else ""
 
         # Generate user prompt
-        user_prompt = CONTENT_ANALYSIS_USER.format(
+        return CONTENT_ANALYSIS_USER.format(
             title=item.title,
             source=f"{item.source_type.value}",
             author=item.author or "Unknown",
@@ -149,13 +154,8 @@ class ContentAnalyzer:
             discussion_section=discussion_section
         )
 
-        # Get AI completion
-        response = await self.client.complete(
-            system=CONTENT_ANALYSIS_SYSTEM,
-            user=user_prompt,
-        )
-
-        # Parse JSON response with robust fallback
+    def _apply_analysis_response(self, item: ContentItem, response: str) -> None:
+        """Validate one model response and update its content item."""
         parsed = self._parse_json_response(response)
         try:
             result = AnalysisResult.model_validate(parsed) if parsed is not None else None
@@ -169,8 +169,23 @@ class ContentAnalyzer:
             item.ai_tags = []
             return
 
-        # Update item with analysis results
         item.ai_score = result.score
         item.ai_reason = result.reason
         item.ai_summary = result.summary
         item.ai_tags = result.tags
+
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(min=2, max=10)
+    )
+    async def _analyze_item(self, item: ContentItem) -> None:
+        """Analyze a single content item and update it in-place."""
+        user_prompt = self._build_user_prompt(item)
+
+        # Get AI completion
+        response = await self.client.complete(
+            system=CONTENT_ANALYSIS_SYSTEM,
+            user=user_prompt,
+        )
+
+        self._apply_analysis_response(item, response)

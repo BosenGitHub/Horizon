@@ -28,7 +28,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Any, Iterable, List, Optional
 
 import httpx
@@ -111,7 +111,105 @@ class OpenBBScraper(BaseScraper):
                 seen_urls.add(url_key)
                 items.append(item)
 
+            if self.openbb_config.fetch_filings:
+                try:
+                    filings = await self._fetch_filings(watchlist, since_utc)
+                except Exception as exc:
+                    logger.warning(
+                        "OpenBB filings for watchlist '%s' failed: %s",
+                        watchlist.name,
+                        exc,
+                    )
+                    continue
+                for item in filings:
+                    url_key = str(item.url)
+                    if url_key in seen_urls:
+                        continue
+                    seen_urls.add(url_key)
+                    items.append(item)
+
         return items
+
+    async def _fetch_filings(
+        self,
+        watchlist: OpenBBWatchlist,
+        since_utc: datetime,
+    ) -> List[ContentItem]:
+        """Fetch recent public-company filings for a watchlist.
+
+        OpenBB's SEC provider accepts one ticker per request, unlike the
+        company-news endpoint. Calls are therefore made once per symbol and
+        constrained to the current Horizon lookback window.
+        """
+        items: List[ContentItem] = []
+        end_date = datetime.now(timezone.utc).date().isoformat()
+        for symbol in watchlist.symbols:
+            try:
+                response = await asyncio.to_thread(
+                    self._obb.equity.fundamental.filings,
+                    symbol=symbol,
+                    start_date=since_utc.date().isoformat(),
+                    end_date=end_date,
+                    limit=watchlist.fetch_limit,
+                    provider=self.openbb_config.filings_provider,
+                )
+            except Exception as exc:
+                logger.warning("OpenBB filings for %s failed: %s", symbol, exc)
+                continue
+            for raw in getattr(response, "results", None) or []:
+                item = self._filing_to_item(raw, watchlist, symbol, since_utc)
+                if item is not None:
+                    items.append(item)
+        return items
+
+    def _filing_to_item(
+        self,
+        raw: Any,
+        watchlist: OpenBBWatchlist,
+        requested_symbol: str,
+        since_utc: datetime,
+    ) -> Optional[ContentItem]:
+        """Map one OpenBB filing record into a ContentItem."""
+        url = self._coerce_url(
+            getattr(raw, "final_link", None) or getattr(raw, "link", None)
+        )
+        if not url:
+            return None
+
+        published = self._coerce_datetime(
+            getattr(raw, "accepted_date", None)
+            or getattr(raw, "filing_date", None)
+        )
+        if published is None or published <= since_utc:
+            return None
+
+        symbol = str(getattr(raw, "symbol", None) or requested_symbol).upper()
+        form_type = str(getattr(raw, "form_type", None) or "SEC filing")
+        cik = getattr(raw, "cik", None)
+        filing_date = getattr(raw, "filing_date", None)
+        filed = filing_date.isoformat() if isinstance(filing_date, date) else str(filing_date or "")
+        title = f"{symbol} filed {form_type}"
+        if filed:
+            title += f" ({filed})"
+
+        return ContentItem(
+            id=self._generate_id("openbb", "filing", self._derive_native_id(url, published)),
+            source_type=self.SOURCE_TYPE,
+            title=title,
+            url=url,
+            content=f"SEC {form_type} filing for {symbol}.",
+            author=symbol,
+            published_at=published,
+            metadata={
+                "watchlist": watchlist.name,
+                "provider": self.openbb_config.filings_provider,
+                "symbols": [symbol],
+                "category": watchlist.category,
+                "content_kind": "filing",
+                "form_type": form_type,
+                "cik": str(cik) if cik is not None else None,
+            },
+        )
 
     async def _fetch_watchlist(
         self,
@@ -195,6 +293,8 @@ class OpenBBScraper(BaseScraper):
             return None
         if isinstance(value, datetime):
             dt = value
+        elif isinstance(value, date):
+            dt = datetime.combine(value, datetime.min.time())
         elif isinstance(value, str):
             try:
                 dt = datetime.fromisoformat(value.replace("Z", "+00:00"))

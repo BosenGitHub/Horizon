@@ -12,7 +12,7 @@ from rich.console import Console
 from .models import Config, ContentItem
 from .storage.manager import StorageManager, safe_output_path
 from .services.email import EmailManager
-from .services.webhook import WebhookNotifier
+from .services.webhook import WebhookFanoutNotifier
 from .scrapers.github import GitHubScraper
 from .scrapers.hackernews import HackerNewsScraper
 from .scrapers.rss import RSSScraper
@@ -175,9 +175,10 @@ class HorizonOrchestrator:
         self.storage = storage
         self.console = Console()
         self.email_manager = EmailManager(config.email, console=self.console) if config.email else None
+        webhook_configs = config.enabled_webhook_configs()
         self.webhook_notifier = (
-            WebhookNotifier(config.webhook, console=self.console)
-            if config.webhook and config.webhook.enabled
+            WebhookFanoutNotifier(webhook_configs, console=self.console)
+            if webhook_configs
             else None
         )
         self.last_fetch_report: Optional[FetchReport] = None

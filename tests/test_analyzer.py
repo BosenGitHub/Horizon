@@ -98,6 +98,30 @@ def test_analyze_batch_concurrent_preserves_order(monkeypatch):
     assert [item.id for item in result] == [item.id for item in items]
 
 
+def test_analyze_batch_uses_bulk_client_when_available():
+    result = {
+        "score": 8.5,
+        "reason": "Relevant",
+        "summary": "A useful update",
+        "tags": ["ai"],
+    }
+
+    async def complete_many(system, users):
+        assert system
+        return [json.dumps(result) for _ in users]
+
+    client = SimpleNamespace(
+        config=SimpleNamespace(analysis_concurrency=2),
+        complete_many=complete_many,
+    )
+    items = [_make_item("rss:test:bulk-1"), _make_item("rss:test:bulk-2")]
+
+    analyzed = asyncio.run(ContentAnalyzer(client).analyze_batch(items))
+
+    assert [item.ai_score for item in analyzed] == [8.5, 8.5]
+    assert [item.ai_summary for item in analyzed] == ["A useful update", "A useful update"]
+
+
 def test_analyze_item_accepts_valid_result():
     result = {
         "score": 8.5,

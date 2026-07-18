@@ -193,7 +193,8 @@ def main() -> None:
             console.print(f"[bold red]Error loading configuration: {e}[/bold red]")
             sys.exit(1)
 
-        if not config.webhook or not config.webhook.enabled:
+        webhook_configs = config.enabled_webhook_configs()
+        if not webhook_configs:
             console.print("[yellow]Webhook is not enabled in config.json.[/yellow]")
             console.print(
                 "Set [cyan]webhook.enabled = true[/cyan] in data/config.json to enable it."
@@ -201,7 +202,8 @@ def main() -> None:
             sys.exit(1)
 
         lang = args.lang or (config.ai.languages[0] if config.ai.languages else "en")
-        asyncio.run(_run_test(config.webhook, lang, args.dry_run, args.delivery))
+        for webhook_config in webhook_configs:
+            asyncio.run(_run_test(webhook_config, lang, args.dry_run, args.delivery))
 
     except KeyboardInterrupt:
         console.print("\n[yellow]Interrupted by user[/yellow]")

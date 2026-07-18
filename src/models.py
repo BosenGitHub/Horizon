@@ -76,6 +76,7 @@ class AIProvider(str, Enum):
     MINIMAX = "minimax"
     DEEPSEEK = "deepseek"
     OLLAMA = "ollama"
+    CODEX = "codex"
 
 
 # Provider-specific defaults used by setup and provider-chain expansion.
@@ -127,6 +128,11 @@ AI_PROVIDER_DEFAULTS = {
         "api_key_env": "",
         "base_url": "http://localhost:11434/v1",
     },
+    AIProvider.CODEX: {
+        "model": "gpt-5.6-luna",
+        "api_key_env": "",
+        "base_url": None,
+    },
 }
 
 
@@ -143,6 +149,7 @@ class AIConfig(BaseModel):
     throttle_sec: float = 0.0
     analysis_concurrency: int = 1
     enrichment_concurrency: int = 1
+    codex_batch_size: int = Field(default=8, ge=1, le=20)
     languages: List[str] = Field(default_factory=lambda: ["en"])
     # Azure OpenAI specific; required when provider == AZURE
     azure_endpoint_env: Optional[str] = None
@@ -499,3 +506,12 @@ class Config(BaseModel):
     extractors: Dict[str, ExtractorConfig] = Field(default_factory=dict)
     email: Optional[EmailConfig] = None
     webhook: Optional[WebhookConfig] = None
+    webhooks: List[WebhookConfig] = Field(default_factory=list)
+
+    def enabled_webhook_configs(self) -> List[WebhookConfig]:
+        """Return enabled legacy and multi-target webhook configurations."""
+        targets: List[WebhookConfig] = []
+        if self.webhook and self.webhook.enabled:
+            targets.append(self.webhook)
+        targets.extend(target for target in self.webhooks if target.enabled)
+        return targets

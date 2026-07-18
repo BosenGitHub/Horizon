@@ -35,6 +35,15 @@ _SENSITIVE_NAME = re.compile(
 )
 
 
+def _enabled_webhook_configs(config: Any) -> list[Any]:
+    """Support both current Config models and lightweight test adapters."""
+    resolver = getattr(config, "enabled_webhook_configs", None)
+    if callable(resolver):
+        return list(resolver())
+    legacy = getattr(config, "webhook", None)
+    return [legacy] if legacy and getattr(legacy, "enabled", False) else []
+
+
 def _redact_config(value: Any, key: str = "") -> Any:
     """Redact secrets from expanded config while preserving its structure."""
     if key.lower().endswith("_env"):
@@ -256,9 +265,9 @@ class HorizonPipelineService:
                 if not os.getenv(pwd_key):
                     missing_env.append(pwd_key)
 
-            if getattr(ctx.config, "webhook", None) and ctx.config.webhook and ctx.config.webhook.enabled:
-                if ctx.config.webhook.url_env and not os.getenv(ctx.config.webhook.url_env):
-                    missing_env.append(ctx.config.webhook.url_env)
+            for webhook_config in _enabled_webhook_configs(ctx.config):
+                if webhook_config.url_env and not os.getenv(webhook_config.url_env):
+                    missing_env.append(webhook_config.url_env)
 
         return {
             "horizon_path": str(ctx.horizon_path),
@@ -719,15 +728,14 @@ class HorizonPipelineService:
             sources=None,
         )
 
-        webhook_config = ctx.config.webhook
-        if not webhook_config:
+        webhook_configs = _enabled_webhook_configs(ctx.config)
+        if not webhook_configs:
             return {
                 "sent": False,
                 "status": "disabled",
                 "reason": "Webhook is not configured.",
             }
 
-        notifier = WebhookNotifier(webhook_config)
         variables = {
             "date": date,
             "language": language,
@@ -740,9 +748,26 @@ class HorizonPipelineService:
             "summary": summary,
         }
 
-        delivery = await notifier.notify(variables)
+        deliveries = []
+        for webhook_config in webhook_configs:
+            delivery = await WebhookNotifier(webhook_config).notify(variables)
+            deliveries.append(
+                {
+                    "platform": getattr(webhook_config, "platform", "generic"),
+                    "url_env": getattr(webhook_config, "url_env", None),
+                    **delivery.to_dict(),
+                }
+            )
 
+        rendered_variables = {
+            k: (v if k != "summary" else f"<{len(v)} chars>")
+            for k, v in variables.items()
+        }
+        if len(deliveries) == 1:
+            return {**deliveries[0], "variables": rendered_variables}
         return {
-            **delivery.to_dict(),
-            "variables": {k: (v if k != "summary" else f"<{len(v)} chars>") for k, v in variables.items()},
+            "sent": all(item["sent"] for item in deliveries),
+            "status": "success" if all(item["sent"] for item in deliveries) else "partial_failure",
+            "deliveries": deliveries,
+            "variables": rendered_variables,
         }

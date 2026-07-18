@@ -69,14 +69,22 @@ def configure_ai() -> Optional[AIConfig]:
             "Ollama base URL (leave empty for http://localhost:11434)",
             default="",
         )
+    elif provider_enum == AIProvider.CODEX:
+        base_url = ""
     else:
         base_url = Prompt.ask("Base URL (leave empty for default)", default="")
 
-    # Determine default env var name
-    api_key_env = Prompt.ask(
-        "API key environment variable name",
-        default=provider_defaults.get("api_key_env", "API_KEY"),
-    )
+    if provider_enum == AIProvider.CODEX:
+        api_key_env = ""
+        console.print(
+            "[green]✓ Codex uses your local ChatGPT login; no API key is required.[/green]"
+        )
+    else:
+        # Determine default env var name
+        api_key_env = Prompt.ask(
+            "API key environment variable name",
+            default=provider_defaults.get("api_key_env", "API_KEY"),
+        )
 
     # Check if the key is actually set
     if api_key_env and not os.getenv(api_key_env):
@@ -104,7 +112,7 @@ def configure_ai() -> Optional[AIConfig]:
 
 
 def _ai_recommendations_available(ai_config: AIConfig) -> bool:
-    if ai_config.provider == AIProvider.OLLAMA:
+    if ai_config.provider in {AIProvider.OLLAMA, AIProvider.CODEX}:
         return True
     return bool(ai_config.api_key_env and os.getenv(ai_config.api_key_env))
 

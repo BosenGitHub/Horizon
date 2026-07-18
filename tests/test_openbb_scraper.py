@@ -14,9 +14,9 @@ verify that:
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
@@ -43,8 +43,8 @@ def _cfg(**overrides) -> OpenBBConfig:
 
 def _make_scraper(config: OpenBBConfig, obb: object) -> OpenBBScraper:
     client = httpx.AsyncClient()
-    scraper = OpenBBScraper(config, client)
-    scraper._obb = obb
+    with patch.object(OpenBBScraper, "_try_import_obb", return_value=obb):
+        scraper = OpenBBScraper(config, client)
     return scraper
 
 
@@ -169,6 +169,54 @@ class TestMapping:
         result = asyncio.run(scraper.fetch(now - timedelta(hours=1)))
         assert len(result) == 1
         assert result[0].published_at.tzinfo is not None
+
+
+class TestFilings:
+    def test_fetches_and_maps_sec_filings_when_enabled(self):
+        now = datetime.now(timezone.utc)
+        obb = MagicMock()
+        obb.news.company.return_value = SimpleNamespace(results=[])
+        obb.equity.fundamental.filings.return_value = SimpleNamespace(
+            results=[
+                SimpleNamespace(
+                    symbol="NVDA",
+                    cik="1045810",
+                    filing_date=now.date(),
+                    accepted_date=now,
+                    form_type="8-K",
+                    link="https://www.sec.gov/Archives/example-index.html",
+                    final_link="https://www.sec.gov/Archives/example.htm",
+                )
+            ]
+        )
+        scraper = _make_scraper(_cfg(fetch_filings=True), obb=obb)
+
+        result = asyncio.run(scraper.fetch(now - timedelta(hours=1)))
+
+        assert len(result) == 1
+        assert obb.equity.fundamental.filings.call_count == 2
+        item = result[0]
+        assert item.title.startswith("NVDA filed 8-K")
+        assert item.metadata["content_kind"] == "filing"
+        assert item.metadata["provider"] == "sec"
+        assert item.id.startswith("openbb:filing:")
+        call_kwargs = obb.equity.fundamental.filings.call_args.kwargs
+        assert call_kwargs["provider"] == "sec"
+        assert call_kwargs["limit"] == 5
+
+    def test_does_not_fetch_filings_when_disabled(self):
+        now = datetime.now(timezone.utc)
+        obb = MagicMock()
+        obb.news.company.return_value = SimpleNamespace(results=[])
+        scraper = _make_scraper(_cfg(fetch_filings=False), obb=obb)
+
+        assert asyncio.run(scraper.fetch(now - timedelta(hours=1))) == []
+        obb.equity.fundamental.filings.assert_not_called()
+
+    def test_maps_date_only_filing_timestamp(self):
+        scraper = _make_scraper(_cfg(), obb=MagicMock())
+        result = scraper._coerce_datetime(date(2026, 7, 18))
+        assert result == datetime(2026, 7, 18, tzinfo=timezone.utc)
 
 
 class TestFiltering:

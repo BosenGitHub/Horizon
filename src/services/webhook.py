@@ -836,3 +836,18 @@ class WebhookNotifier:
                 "summary": f"generation failed: {error_message}",
             }
         )
+
+
+class WebhookFanoutNotifier:
+    """Deliver the same Horizon notification to multiple webhook targets."""
+
+    def __init__(self, configs: List[WebhookConfig], console=None):
+        self.notifiers = [WebhookNotifier(config, console=console) for config in configs]
+
+    async def send_daily_summary(self, **kwargs) -> None:
+        for notifier in self.notifiers:
+            await notifier.send_daily_summary(**kwargs)
+
+    async def send_failure(self, **kwargs) -> None:
+        for notifier in self.notifiers:
+            await notifier.send_failure(**kwargs)

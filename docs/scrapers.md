@@ -151,7 +151,7 @@ Subreddits and users are fetched concurrently. Comments are sorted by score, lim
 
 **File**: `src/scrapers/openbb.py`
 
-Uses the [OpenBB Platform](https://www.openbb.co/platform) Python SDK via `obb.news.company()` to fetch company news for one or more ticker watchlists.
+Uses the [OpenBB Platform](https://www.openbb.co/platform) Python SDK via `obb.news.company()` to fetch company news and, when enabled, `obb.equity.fundamental.filings()` to fetch public-company filings for one or more ticker watchlists.
 
 The scraper imports `openbb` lazily. If the optional dependency is not installed, Horizon logs a warning and skips the source instead of failing the whole run.
 
@@ -160,6 +160,8 @@ The scraper imports `openbb` lazily. If the optional dependency is not installed
 ```json
 {
   "enabled": true,
+  "fetch_filings": true,
+  "filings_provider": "sec",
   "watchlists": [
     {
       "name": "megacaps",
@@ -174,6 +176,8 @@ The scraper imports `openbb` lazily. If the optional dependency is not installed
 ```
 
 - `watchlists` — each enabled watchlist triggers one `news.company()` call per run
+- `fetch_filings` — fetch filings for each ticker in the current lookback window
+- `filings_provider` — provider for filings; `sec` works without a paid API key
 - `provider` — OpenBB provider name for that watchlist
 - `symbols` — tickers fetched together for the same provider
 - `fetch_limit` — maximum rows requested from the provider

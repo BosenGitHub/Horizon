@@ -77,7 +77,7 @@
 ## 功能特性
 
 - **📡 关注你的信息源** — 将 Hacker News、RSS、Reddit、Telegram、Twitter/X、GitHub Release / 用户动态，以及 OpenBB 金融新闻观察列表纳入同一条 pipeline
-- **🤖 把噪声变成阅读清单** — 使用 Claude、GPT、Gemini、DeepSeek、豆包、MiniMax 或任意 OpenAI 兼容 API，为每条内容评分 0-10
+- **🤖 把噪声变成阅读清单** — 使用 Claude、GPT、Gemini、DeepSeek、豆包、MiniMax、Ollama、本机已登录的 Codex 套餐或任意 OpenAI 兼容 API，为每条内容评分 0-10
 - **🔗 合并重复新闻** — 在生成日报前自动合并来自不同平台的相同故事
 - **🔍 补全背景知识** — 为陌生概念、公司、项目和技术术语补充网络搜索得到的背景解释
 - **💬 读到社区声音** — 收集并总结 Hacker News、Reddit 等来源的评论讨论

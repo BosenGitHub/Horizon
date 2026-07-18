@@ -116,6 +116,8 @@ def test_successful_fetch_returns_items(monkeypatch):
     tweets = [_tweet("1"), _tweet("2", text="Another tweet")]
 
     def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.params.get("token") is None
+        assert request.headers["Authorization"] == "Bearer test_token"
         if "/runs" in request.url.path and request.method == "POST":
             return httpx.Response(200, json=_run_resp())
         if "/actor-runs/" in request.url.path:
@@ -415,6 +417,5 @@ def test_fetch_replies_no_conversation_id_returns_empty(monkeypatch):
     result = asyncio.run(scraper.fetch_replies_for_item(item))
     asyncio.run(client.aclose())
     assert result == []
-
 
 
